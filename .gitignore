@@ -82,3 +82,8 @@ ehthumbs.db
 *.pyd
 
 sdd/
+
+# Embeddings artifacts
+embeddings_cache.json
+*.embeddings.json
+embeddings/

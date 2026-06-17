@@ -1,5 +1,6 @@
 import os
 import io
+import sys
 import time
 import asyncio
 import traceback
@@ -11,8 +12,14 @@ import httpx
 import litellm
 from dotenv import load_dotenv
 
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 from agents import Agent
-from agents.extensions.models.litellm_model import LitellmModel
 from agents.voice import (
     AudioInput,
     SingleAgentVoiceWorkflow,
@@ -21,8 +28,10 @@ from agents.voice import (
 )
 from agents.voice.result import StreamedAudioResult
 
-# Import custom components from main.py
-from main import GroqSTTModel, DeepgramTTSModel, get_current_time
+# Import custom components from main.py and models_config.py
+from main import get_current_time
+from rag_handler import query_knowledge_base, initialize_knowledge_base
+from models_config import get_reasoning_model, get_stt_model, get_tts_model
 
 # Load environment variables
 load_dotenv()
@@ -134,6 +143,8 @@ async def run_voice_turn(pipeline: VoicePipeline, audio_data: np.ndarray, sample
                     output_stream.write(event.data.tobytes())
                 elif event.type == "voice_stream_event_error":
                     print(f"\n[TTS Stream Event Error: {event.error}]")
+            # Wait for remaining audio in sounddevice buffer to finish playing
+            await asyncio.sleep(output_stream.latency + 0.2)
     except Exception as e:
         print(f"\n[Audio Playback Error: {e}]")
 
@@ -146,29 +157,41 @@ async def main():
     print("             WAV FILE VOICE AGENT TEST RUNNER                        ")
     print("=====================================================================")
 
-    # Select the model dynamically
-    model_name = os.getenv("AGENT_MODEL", "groq/openai/gpt-oss-120b")
-    print(f"\nConfiguring reasoning model: {model_name}...")
-    
-    if "gemini" in model_name:
-        api_key = GEMINI_KEY
-    elif "groq" in model_name:
-        api_key = GROQ_KEY
-    else:
-        api_key = os.getenv("OPENAI_API_KEY")
+    # Initialize the reasoning model dynamically from models_config
+    llm_model = get_reasoning_model()
 
-    # Initialize the reasoning model
-    llm_model = LitellmModel(
-        model=model_name,
-        api_key=api_key
-    )
+    # Initialize the RAG knowledge base
+    initialize_knowledge_base()
 
-    # Initialize the Agent
+    # Initialize the Agent with Urdu System Instructions
     agent = Agent(
-        name="Voice Assistant",
-        instructions="You are a helpful, brief, and concise voice assistant. Keep your responses short (1-2 sentences) since they will be read aloud.",
+        name="Valeria",
+        instructions=(
+            "You are Valeria, a warm, professional, and conversion-focused inbound call agent for Digital Graphiks, "
+            "a leading custom website design, branding, and digital marketing agency based in the UAE (with over 15 years of experience).\n\n"
+            "BILINGUAL LANGUAGE RULES:\n"
+            "- Standard/First Priority Language: English. If the user initiates or speaks in English, respond in English.\n"
+            "- Urdu Language Support: If the user speaks in Urdu (either in Urdu script or Roman Urdu), you MUST respond in Urdu (using standard Urdu script).\n"
+            "- Always match the language the user speaks to you in.\n\n"
+            "CRITICAL VOICE CALL RULES:\n"
+            "- Always keep your responses very short and natural for a voice conversation (1 to 2 sentences, maximum 3).\n"
+            "- Never output bullet points, markdown list markers, or asterisks (*). Present options or steps as running text.\n"
+            "- NEVER say things like 'according to the document', 'based on the PDF', or 'in the knowledge base'. You are Valeria; "
+            "speak in the first-person ('we', 'our team', 'at Digital Graphiks').\n"
+            "- If the user asks about specific pricing, services (custom websites, branding, SEO, e-commerce, LMS, AI solutions), "
+            "objections, or timelines, use the 'query_knowledge_base' tool to lookup the details. Do not guess.\n"
+            "- Ballpark pricing guide:\n"
+            "  * Basic Website starts around AED 2,000.\n"
+            "  * Logo Design starts from AED 1,800.\n"
+            "  * SEO Plans typically start from AED 3,500/month.\n"
+            "  * Basic E-commerce Store (up to 20 products) starts around AED 7,500.\n"
+            "  * Basic LMS starts at AED 15,000.\n"
+            "  * Simple AI Tools (like chatbots) start from AED 15,000.\n"
+            "- Your primary goal is to guide the user to schedule a discovery/strategy meeting (online or at the Dubai office). "
+            "If they show interest, offer to schedule a meeting and send them the company profile and details."
+        ),
         model=llm_model,
-        tools=[get_current_time]
+        tools=[get_current_time, query_knowledge_base]
     )
 
     # Configure the pipeline (disable tracing to avoid OpenAI trace errors)
@@ -176,8 +199,8 @@ async def main():
     config = VoicePipelineConfig(tracing_disabled=True)
     pipeline = VoicePipeline(
         workflow=workflow,
-        stt_model=GroqSTTModel(),
-        tts_model=DeepgramTTSModel(),
+        stt_model=get_stt_model(),
+        tts_model=get_tts_model(),
         config=config
     )
 
