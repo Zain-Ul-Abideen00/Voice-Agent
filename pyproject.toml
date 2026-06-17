@@ -1,0 +1,13 @@
+[project]
+name = "test-voice-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "httpx>=0.28.1",
+    "numpy>=2.4.6",
+    "openai-agents[litellm,voice]>=0.17.5",
+    "python-dotenv>=1.2.2",
+    "sounddevice>=0.5.5",
+]
